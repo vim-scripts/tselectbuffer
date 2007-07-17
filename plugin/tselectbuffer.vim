@@ -3,35 +3,38 @@
 " @Website:     http://www.vim.org/account/profile.php?user_id=4037
 " @License:     GPL (see http://www.gnu.org/licenses/gpl.txt)
 " @Created:     2007-04-15.
-" @Last Change: 2007-05-16.
-" @Revision:    0.2.133
+" @Last Change: 2007-07-01.
+" @Revision:    0.3.177
+" GetLatestVimScripts: 1866 1 :AutoInstall: tselectbuffer.vim
 
 if &cp || exists("loaded_tselectbuffer")
     finish
 endif
-if !exists('loaded_tlib')
-    echoerr "tlib is required"
+if !exists('loaded_tlib') || loaded_tlib < 9
+    echoerr 'tlib >= 0.9 is required'
     finish
 endif
-let loaded_tselectbuffer = 2
+let loaded_tselectbuffer = 3
 
-fun! s:SNR()
+function! s:SNR()
     return matchstr(expand('<sfile>'), '<SNR>\d\+_\zeSNR$')
 endf
 
 if !exists('g:tselectbuffer_autopick') | let g:tselectbuffer_autopick = 1 | endif
 if !exists('g:tselectbuffer_handlers')
     let g:tselectbuffer_handlers = [
-                \ {'key':  4, 'agent': s:SNR() .'AgentDeleteBuffer', 'key_name': '<c-d>', 'help': 'Delete buffer(s)'},
-                \ {'key': 19, 'agent': s:SNR() .'AgentSplitBuffer', 'key_name': 'CTRL-S', 'help': 'Show in split buffer'},
+                \ {'key':  4, 'agent': s:SNR() .'AgentDeleteBuffer',  'key_name': '<c-d>', 'help': 'Delete buffer(s)'},
+                \ {'key': 21, 'agent': s:SNR() .'AgentRenameBuffer',  'key_name': '<c-u>', 'help': 'Rename buffer(s)'},
+                \ {'key': 19, 'agent': s:SNR() .'AgentSplitBuffer',   'key_name': '<c-s>', 'help': 'Show in split buffer'},
+                \ {'key': 22, 'agent': s:SNR() .'AgentVSplitBuffer',  'key_name': '<c-v>', 'help': 'Show in vsplit buffer'},
                 \ ]
-                " \ {'key': 20, 'agent': s:SNR() .'AgentTabBuffer', 'key_name': 'CTRL-T', 'help': 'Show in tabs'},
+                " \ {'key': 20, 'agent': s:SNR() .'AgentTabBuffer',     'key_name': '<c-t>', 'help': 'Show in tab'},
     if !g:tselectbuffer_autopick
         call add(g:tselectbuffer_handlers, {'pick_last_item': 0})
     endif
 endif
 
-fun! s:PrepareSelectBuffer()
+function! s:PrepareSelectBuffer()
     redir => bfs
     exec 'silent ls'. s:selectbuffer_bang
     redir END
@@ -42,7 +45,7 @@ fun! s:PrepareSelectBuffer()
     return s:selectbuffer_list
 endf
 
-fun! s:GetBufNr(buffer)
+function! s:GetBufNr(buffer)
     " TLogVAR a:buffer
     let bi = index(s:selectbuffer_list, a:buffer)
     " TLogVAR bi
@@ -51,7 +54,38 @@ fun! s:GetBufNr(buffer)
     return 0 + bx
 endf
 
-fun! s:DeleteThisBuffer(buffer)
+function! s:RenameThisBuffer(buffer)
+    let bx = s:GetBufNr(a:buffer)
+    let on = bufname(bx)
+    let nn = input('Rename buffer: ', on)
+    if !empty(nn) && nn != on
+        exec 'buffer '. bx
+        if filereadable(on) && &buftype !~ '\<nofile\>'
+            " if filewritable(nn)
+                call rename(on, nn)
+                echom 'Rename file: '. on .' -> '. nn
+            " else
+            "     echoerr 'File cannot be renamed: '. nn
+            " endif
+        endif
+        exec 'file! '. escape(nn, ' %#')
+        echom 'Rename buffer: '. on .' -> '. nn
+        return 1
+    endif
+    return 0
+endf
+
+function! s:AgentRenameBuffer(world, selected)
+    call a:world.CloseScratch()
+    for buffer in a:selected
+        call s:RenameThisBuffer(buffer)
+    endfor
+    let a:world.state = 'reset'
+    let a:world.base  = s:PrepareSelectBuffer()
+    return a:world
+endf
+
+function! s:DeleteThisBuffer(buffer)
     let bx = s:GetBufNr(a:buffer)
     let doit = input('Delete buffer "'. bufname(bx) .'"? (y/N) ', s:delete_this_buffer_default)
     echo
@@ -59,15 +93,20 @@ fun! s:DeleteThisBuffer(buffer)
         if doit ==# 'Y'
             let s:delete_this_buffer_default = 'y'
         endif
-        exec 'bdelete '. bx
-        echom 'Delete buffer '. bx .': '. a:buffer
+        if bufloaded(bx)
+            exec 'bdelete '. bx
+            echom 'Delete buffer '. bx .': '. a:buffer
+        else
+            exec 'bwipeout '. bx
+            echom 'Wipe out buffer '. bx .': '. a:buffer
+        end
         return 1
     endif
     return 0
 endf
 
-fun! s:AgentDeleteBuffer(world, selected)
-    call tlib#CloseScratch(a:world)
+function! s:AgentDeleteBuffer(world, selected)
+    call a:world.CloseScratch()
     let s:delete_this_buffer_default = ''
     for buffer in a:selected
         call s:DeleteThisBuffer(buffer)
@@ -77,22 +116,35 @@ fun! s:AgentDeleteBuffer(world, selected)
     return a:world
 endf
 
-fun! s:AgentSplitBuffer(world, selected)
-    call tlib#CloseScratch(a:world)
-    for b in a:selected
-        " TLogVAR b
-        if bufwinnr(b) == -1
-            call s:SwitchToBuffer(b, 'sbuffer')
-        endif
-        redraw
-    endfor
-    call a:world.Reset()
-    let a:world.state = ''
-    return a:world
+function! s:GetBufferNumbers(selected) "{{{3
+    return map(copy(a:selected), 's:GetBufNr(v:val)')
 endf
 
-" fun! s:AgentTabBuffer(world, selected)
-"     call tlib#CloseScratch(a:world)
+function! s:AgentSplitBuffer(world, selected)
+    return tlib#agent#EditFileInSplit(a:world, s:GetBufferNumbers(a:selected))
+    " call a:world.CloseScratch()
+    " for b in a:selected
+    "     " TLogVAR b
+    "     if bufwinnr(b) == -1
+    "         call s:SwitchToBuffer(b, 'sbuffer')
+    "     endif
+    "     redraw
+    " endfor
+    " call a:world.Reset()
+    " let a:world.state = ''
+    " return a:world
+endf
+
+function! s:AgentVSplitBuffer(world, selected)
+    return tlib#agent#EditFileInVSplit(a:world, s:GetBufferNumbers(a:selected))
+endf
+
+function! s:AgentTabBuffer(world, selected)
+    return tlib#agent#EditFileInTab(a:world, s:GetBufferNumbers(a:selected))
+endf
+
+" function! s:AgentTabBuffer(world, selected)
+"     call a:world.CloseScratch()
 "     for b in a:selected
 "         " TLogVAR b
 "         call s:SwitchToBuffer(b, 'tab sbuffer')
@@ -102,7 +154,7 @@ endf
 "     return a:world
 " endf
 
-fun! s:SwitchToBuffer(buffer, command)
+function! s:SwitchToBuffer(buffer, command)
     let bi = s:GetBufNr(a:buffer)
     " TLogVAR a:buffer
     " TLogVAR bi
@@ -112,9 +164,9 @@ fun! s:SwitchToBuffer(buffer, command)
     endif
 endf
 
-fun! TSelectBuffer(bang)
+function! TSelectBuffer(bang)
     let s:selectbuffer_bang = a:bang
-    let b = tlib#InputList('m', 'Select buffer', s:PrepareSelectBuffer(), g:tselectbuffer_handlers)
+    let b = tlib#input#List('m', 'Select buffer', s:PrepareSelectBuffer(), g:tselectbuffer_handlers)
     if !empty(b)
         " TLogVAR b
         call s:SwitchToBuffer(b[0], 'buffer')
@@ -130,7 +182,7 @@ features other buffer selectors have but can be nevertheless be useful
 for switching to a different buffer or for deleting buffers.
 
 It was originally rather a by-product of tlib (vimscript #1863) and uses 
-its tlib#InputList() function. This function allows quickly selecting a 
+its tlib#input#List() function. This function allows quickly selecting a 
 buffer by typing some part of the name (which will actually filter the 
 list until only one item is left), the number, or by clicking with the 
 mouse on the entry.
@@ -149,4 +201,10 @@ Initial release
 
 0.2
 - Minor improvements
+
+0.3
+- <c-u>: Rename buffer (and file on disk)
+- <c-v>: Show buffers in vertically split windows
+- Require tlib 0.9
+- "Delete buffer" will wipe-out unloaded buffers.
 
