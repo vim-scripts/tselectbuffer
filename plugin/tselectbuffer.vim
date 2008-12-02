@@ -1,24 +1,32 @@
 " tselectbuffer.vim -- A simplicistic buffer selector/switcher
-" @Author:      Thomas Link (mailto:micathom AT gmail com?subject=[vim])
+" @Author:      Thomas Link (micathom AT gmail com?subject=[vim])
 " @Website:     http://www.vim.org/account/profile.php?user_id=4037
 " @License:     GPL (see http://www.gnu.org/licenses/gpl.txt)
 " @Created:     2007-04-15.
-" @Last Change: 2007-09-11.
-" @Revision:    0.4.303
+" @Last Change: 2008-08-18.
+" @Revision:    314
 " GetLatestVimScripts: 1866 1 tselectbuffer.vim
 
 if &cp || exists("loaded_tselectbuffer")
     finish
 endif
-if !exists('loaded_tlib') || loaded_tlib < 12
-    echoerr 'tlib >= 0.12 is required'
+if !exists('loaded_tlib') || loaded_tlib < 24
+    echoerr 'tlib >= 0.24 is required'
     finish
 endif
-let loaded_tselectbuffer = 4
+let loaded_tselectbuffer = 6
 
 function! s:SNR()
     return matchstr(expand('<sfile>'), '<SNR>\d\+_\zeSNR$')
 endf
+
+" Possible values:
+"   bufnr :: Default behaviour
+"   mru   :: Sort buffers according to most recent use
+"
+" NOTE: MRU order works on second invocation only. If you want to always 
+" use MRU order, call tlib#buffer#EnableMRU() in your ~/.vimrc file.
+TLet g:tselectbuffer_order = 'bufnr'
 
 if !exists('g:tselectbuffer_autopick') | let g:tselectbuffer_autopick = 1 | endif
 if !exists('g:tselectbuffer_handlers')
@@ -38,12 +46,12 @@ if !exists('g:tselectbuffer_handlers')
 endif
 
 function! s:PrepareSelectBuffer()
-    let [s:selectbuffer_nr, s:selectbuffer_list] = tlib#buffer#GetList(s:selectbuffer_hidden, 1)
+    let [s:selectbuffer_nr, s:selectbuffer_list] = tlib#buffer#GetList(s:selectbuffer_hidden, 1, g:tselectbuffer_order)
     let s:selectbuffer_alternate = ''
     let s:selectbuffer_alternate_n = 0
     for b in s:selectbuffer_list
         let s:selectbuffer_alternate_n -= 1
-        if b[1] == '#'
+        if b =~ '^\s*\d\+\s\+#'
             let s:selectbuffer_alternate = b
             let s:selectbuffer_alternate_n = -s:selectbuffer_alternate_n
             break
@@ -129,24 +137,24 @@ function! s:AgentDeleteBuffer(world, selected)
     return a:world
 endf
 
-function! s:GetBufferNumbers(selected) "{{{3
-    return map(copy(a:selected), 's:GetBufNr(v:val)')
+function! s:GetBufferNames(selected) "{{{3
+    return map(copy(a:selected), 'bufname(s:GetBufNr(v:val))')
 endf
 
 function! s:AgentSplitBuffer(world, selected)
-    return tlib#agent#EditFileInSplit(a:world, s:GetBufferNumbers(a:selected))
+    return tlib#agent#EditFileInSplit(a:world, s:GetBufferNames(a:selected))
 endf
 
 function! s:AgentVSplitBuffer(world, selected)
-    return tlib#agent#EditFileInVSplit(a:world, s:GetBufferNumbers(a:selected))
+    return tlib#agent#EditFileInVSplit(a:world, s:GetBufferNames(a:selected))
 endf
 
 function! s:AgentOpenBuffer(world, selected)
-    return tlib#agent#ViewFile(a:world, s:GetBufferNumbers(a:selected))
+    return tlib#agent#ViewFile(a:world, s:GetBufferNames(a:selected))
 endf
 
 function! s:AgentTabBuffer(world, selected)
-    return tlib#agent#EditFileInTab(a:world, s:GetBufferNumbers(a:selected))
+    return tlib#agent#EditFileInTab(a:world, s:GetBufferNames(a:selected))
 endf
 
 function! s:AgentJumpBuffer(world, selected) "{{{3
@@ -201,7 +209,8 @@ function! TSelectBuffer(show_hidden)
     if !empty(s:selectbuffer_alternate_n)
         call add(bhs, {'initial_index': s:selectbuffer_alternate_n})
     endif
-    let b = tlib#input#List('m', 'Select buffer', bs, bhs)
+    let msg = printf('Select buffer (%s)', g:tselectbuffer_order)
+    let b = tlib#input#List('m', msg, bs, bhs)
 endf
 command! -count=0 -bang TSelectBuffer call TSelectBuffer(!empty("<bang>") || v:count)
 
@@ -262,4 +271,11 @@ page (if any)
 - Initially select the alternate buffer
 - Make a count act as bang.
 - Can be "suspended" (i.e. you can switch back to the orignal window)
+
+0.5
+- Alternate buffer wasn't initially selected after 0.4
+- FIX: <c-s> and similar keys didn't work.
+
+0.6
+- MRU order
 
